@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Online图表配置 - LiteReport平台</title>
+<link rel="stylesheet" href="/css/app.css?v=2">
+</head>
+<body>
+<nav class="nav" id="nav"></nav>
+
+<div class="page" style="max-width:1300px">
+  <div class="card mb12">
+    <div class="toolbar">
+      <button class="btn btn-primary" onclick="openCreate()">＋ 新建图表</button>
+      <button class="btn" onclick="location.href='/bigscreen.html'">🖥 数据大屏</button>
+      <span class="grow"></span>
+      <button class="icon-btn" onclick="load()">⟳</button>
+    </div>
+    <div class="table-wrap">
+      <table class="grid" id="grid">
+        <thead><tr><th>图表名称</th><th>绑定报表</th><th>类型</th><th>维度</th><th>度量</th><th>聚合</th><th>创建时间</th><th style="width:150px">操作</th></tr></thead>
+        <tbody id="body"></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="card">
+    <div id="main" style="width:100%;height:460px"></div>
+  </div>
+</div>
+
+<div class="mask" id="chartModal">
+  <div class="modal" style="width:620px">
+    <div class="modal-head"><span class="title" id="cmTitle">新建图表</span>
+      <button class="close" onclick="closeModal('chartModal')">✕</button></div>
+    <div class="modal-body">
+      <div class="form-row">
+        <span class="form-item"><label class="req">图表名称:</label><input class="input w-md" id="fName"></span>
+        <span class="form-item"><label class="req">绑定报表:</label><select class="input w-md" id="fReport" onchange="loadCols()"></select></span>
+      </div>
+      <div class="form-row">
+        <span class="form-item"><label class="req">类型:</label>
+          <select class="input w-md" id="fType"><option value="bar">柱状图</option><option value="line">折线图</option><option value="pie">饼图</option></select></span>
+        <span class="form-item"><label class="req">维度字段:</label><select class="input w-md" id="fDim"></select></span>
+      </div>
+      <div class="form-row">
+        <span class="form-item"><label>度量字段:</label><select class="input w-md" id="fMeasure"></select></span>
+        <span class="form-item"><label>聚合:</label>
+          <select class="input w-md" id="fAgg">
+            <option value="sum">求和SUM</option><option value="count">计数COUNT</option>
+            <option value="avg">平均AVG</option><option value="max">最大MAX</option><option value="min">最小MIN</option>
+          </select></span>
+      </div>
+      <p class="muted">聚合作用于报表SQL全量结果集按维度分组；图表数据走公共接口 getChartData。</p>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal('chartModal')">取消</button>
+      <button class="btn btn-primary" onclick="save()">保存</button>
+    </div>
+  </div>
+</div>
+
+<script src="/lib/echarts.min.js"></script>
+<script src="/js/common.js?v=2"></script>
+<script>
+renderNav('Online图表配置');
+var myChart = null, reports = [], cols = [];
+
+var table = new LiteTable({
+  table: '#grid',
+  columns: [
+    { title: '图表名称', field: 'chartName' },
+    { title: '绑定报表', td: function (c) { return '<span class="mono">' + esc(c.reportCode) + '</span>'; } },
+    { title: '类型', field: 'chartType' },
+    { title: '维度', td: function (c) { return '<span class="mono">' + esc(c.dimField) + '</span>'; } },
+    { title: '度量', td: function (c) { return '<span class="mono">' + esc(c.measureField || '-') + '</span>'; } },
+    { title: '聚合', field: 'agg' },
+    { title: '创建时间', field: 'createTime' },
+    { title: '操作', td: function (c) {
+        return '<a href="javascript:void(0)" class="c-view" data-id="' + c.id + '">查看</a> ' +
+          '<a href="javascript:void(0)" class="btn-link danger c-del" data-id="' + c.id + '">删除</a>';
+      } },
+  ],
+  emptyText: '暂无图表，点击「新建图表」创建',
+  fetch: function (page, size) {
+    return api('/api/chart/list').then(function (list) {
+      list = list || [];
+      return { rows: list, total: list.length };
+    });
+  }
+});
+function load() { table.reload(); }
+$('#body').addEventListener('click', function (e) {
+  var a = e.target.closest('a');
+  if (!a) return;
+  if (a.classList.contains('c-view')) view(a.dataset.id);
+  else if (a.classList.contains('c-del')) del(a.dataset.id);
+});
+
+function openCreate() {
+  $('#cmTitle').textContent = '新建图表';
+  $('#fName').value = '';
+  api('/online/cgreport/head/list?pageNo=1&pageSize=100').then(function (r) {
+    reports = r.records || [];
+    $('#fReport').innerHTML = reports.map(function (h) {
+      return '<option value="' + esc(h.reportCode) + '">' + esc(h.reportName) + '</option>';
+    }).join('');
+    loadCols();
+    openModal('chartModal');
+  }).catch(function (e) { toast(e.message, 'error'); });
+}
+function loadCols() {
+  var code = $('#fReport').value;
+  api('/online/cgreport/api/getColumns/' + encodeURIComponent(code)).then(function (info) {
+    cols = (info.fields || []).filter(function (f) { return f.isShow !== 'N'; });
+    var opts = cols.map(function (f) { return '<option>' + esc(f.fieldName) + '</option>'; }).join('');
+    $('#fDim').innerHTML = opts;
+    $('#fMeasure').innerHTML = opts;
+  });
+}
+function save() {
+  var body = {
+    chartName: $('#fName').value.trim(), reportCode: $('#fReport').value,
+    chartType: $('#fType').value, dimField: $('#fDim').value,
+    measureField: $('#fMeasure').value, agg: $('#fAgg').value
+  };
+  if (!body.chartName) { toast('请填写图表名称', 'error'); return; }
+  api('/api/chart/save', { method: 'POST', body: body }).then(function () {
+    toast('保存成功', 'success'); closeModal('chartModal'); load();
+  }).catch(function (e) { toast(e.message, 'error'); });
+}
+function del(id) {
+  if (!confirm('确认删除该图表？')) return;
+  api('/api/chart/' + id, { method: 'DELETE' }).then(function () { toast('已删除', 'success'); load(); }).catch(function (e) { toast(e.message, 'error'); });
+}
+function view(id) {
+  api('/api/chart/list').then(function (list) {
+    var c = (list || []).find(function (x) { return x.id === id; });
+    if (c) renderChart(c);
+  }).catch(function (e) { toast(e.message, 'error'); });
+}
+function renderChart(c) {
+  api('/online/cgreport/api/getChartData/' + encodeURIComponent(c.reportCode) +
+      '?dim=' + encodeURIComponent(c.dimField) + '&measure=' + encodeURIComponent(c.measureField || '') +
+      '&agg=' + (c.agg || 'sum') + '&limit=20')
+    .then(function (r) {
+      var pts = r.points || [];
+      var names = pts.map(function (p) { return p.name; });
+      var values = pts.map(function (p) { return p.value; });
+      var option;
+      if (c.chartType === 'pie') {
+        option = {
+          title: { text: c.chartName, left: 'center' },
+          tooltip: { trigger: 'item' },
+          series: [{ type: 'pie', radius: '60%', data: pts.map(function (p) { return { name: p.name, value: p.value }; }) }]
+        };
+      } else {
+        option = {
+          title: { text: c.chartName, left: 'center' },
+          tooltip: {},
+          xAxis: { type: 'category', data: names, axisLabel: { rotate: 30 } },
+          yAxis: { type: 'value' },
+          series: [{ type: c.chartType, data: values, itemStyle: { color: '#13a8a8' } }]
+        };
+      }
+      if (!myChart) myChart = echarts.init(document.getElementById('main'));
+      myChart.setOption(option, true);
+      myChart.resize();
+    }).catch(function (e) { toast(e.message, 'error'); });
+}
+window.addEventListener('resize', function () { if (myChart) myChart.resize(); });
+load();
+</script>
+</body>
+</html>

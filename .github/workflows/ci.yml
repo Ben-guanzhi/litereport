@@ -1,0 +1,27 @@
+name: CI
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test -count=1 -race ./...
+      - name: Build
+        run: go build -o litereport .
+  docker:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image（验证 Dockerfile 不腐烂，不推送）
+        run: docker build -t litereport:ci .

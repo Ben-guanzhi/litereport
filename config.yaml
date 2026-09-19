@@ -1,0 +1,89 @@
+# LiteReport 平台配置
+server:
+  port: 8085
+
+# 数据库连接池（对 sqlite 强制单连接，仅网络库生效；零值用默认 max_open=20/max_idle=10）
+dbpool:
+  max_open: 20
+  max_idle: 10
+  max_lifetime_minutes: 60
+  max_idle_time_minutes: 10
+
+# ── 鉴权 ──
+# 管理端：用户名密码登录（会话为 HttpOnly Cookie + JWT，默认 24h）
+# 公共接口：登录会话 或 API Token（请求头 X-API-Token 或 ?token=）
+auth:
+  enabled: true
+  secret: ""            # JWT 签名密钥，生产环境务必修改；留空用内置默认
+  session_hours: 24
+  users:
+    - name: admin
+      password: admin123   # 支持 bcrypt 哈希（$2 前缀自动识别）
+  api_tokens:
+    - demo-token-123
+
+# ── 查询执行 ──
+query:
+  timeout_seconds: 30   # 单次查询超时；<=0 不限制
+
+# ── 限流（令牌桶，按客户端IP）──
+ratelimit:
+  public_rps: 20        # 公共接口 每秒放行
+  public_burst: 40      # 公共接口 桶容量
+  admin_rps: 200        # 管理端 每秒放行
+  admin_burst: 400
+  login_per_min: 10     # 登录尝试 每分钟（防爆破）
+
+# ── 安全 ──
+# 仅当直连对端是下列可信反向代理时才解析 X-Forwarded-For；
+# 默认直连部署不信任 XFF，客户端 IP 取直连地址（防伪造绕过限流）
+security:
+  # trusted_proxies: ["127.0.0.1"]
+
+# ── 数据保留（天，0 = 永久保留；启动时与每24h清理一次）──
+retention:
+  audit_days: 180        # 审计日志
+  sql_history_days: 90   # SQL 执行历史
+  version_days: 180      # 报表配置版本快照
+  chat_days: 90          # AI 对话历史
+
+# 元数据库：存放报表配置（头表/字段明细/参数表）
+# type 支持: sqlite | mysql | postgresql | oracle
+meta:
+  type: sqlite
+  dsn: ./data/litereport.db
+  # —— 切换为 MySQL：
+  # type: mysql
+  # dsn: "root:123456@tcp(127.0.0.1:3306)/litereport?charset=utf8mb4&parseTime=true&loc=Local"
+  # —— 切换为 PostgreSQL：
+  # type: postgresql
+  # dsn: "host=127.0.0.1 port=5432 user=postgres password=123456 dbname=litereport sslmode=disable"
+  # —— 切换为 Oracle：
+  # type: oracle
+  # dsn: "oracle://system:123456@127.0.0.1:1521/xe"
+
+# 动态数据源：报表查询/保存数据的目标库（local 固定指向元数据库）
+datasources:
+  - key: local
+    name: 本地库
+    type: sqlite
+    dsn: ./data/litereport.db
+  # - key: mysql1
+  #   name: 本地mysql
+  #   type: mysql
+  #   dsn: "root:123456@tcp(127.0.0.1:3306)/jeecg?charset=utf8mb4&parseTime=true&loc=Local"
+
+# ── AI 生成 SQL（OpenAI 兼容接口，可选）──
+ai:
+  base_url: ""          # 如 https://api.openai.com/v1 或兼容网关
+  api_key: ""
+  model: gpt-4o-mini
+
+# ── 邮件服务（定时推送用，可选）──
+smtp:
+  host: ""
+  port: 587
+  username: ""
+  password: ""
+  from: "litereport@example.com"
+  alert_email: ""       # 推送失败告警收件箱（可选，需已配置 host）

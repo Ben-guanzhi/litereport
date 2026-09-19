@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>工作台 - LiteReport平台</title>
+<link rel="stylesheet" href="/css/app.css?v=2">
+</head>
+<body>
+<nav class="nav" id="nav"></nav>
+<div class="page">
+  <div class="card">
+    <h2 style="margin-bottom:16px">个人工作台</h2>
+    <div class="dash">
+      <div class="kpi"><div class="num" id="kpiReport">-</div><div class="label">在线报表</div></div>
+      <div class="kpi"><div class="num" id="kpiDs">-</div><div class="label">数据源</div></div>
+      <div class="kpi"><div class="num">5</div><div class="label">公共接口</div></div>
+    </div>
+    <div class="link-cards">
+      <div class="lc" onclick="location.href='/index.html'"><h3>Online报表配置</h3><p>配置报表SQL、字段明细与参数，一键功能测试</p></div>
+      <div class="lc" onclick="location.href='/api.html'"><h3>公共接口文档</h3><p>getData 查询 / saveData 保存 / deleteData 删除，附在线调试台</p></div>
+      <div class="lc" onclick="location.href='/online/cgreport/demo_report'"><h3>AUTO在线报表示例</h3><p>在线测试报表（demo_report）效果预览</p></div>
+      <div class="lc" onclick="location.href='/form.html'"><h3>Online表单开发</h3><p>建表向导生成表单与报表，数据在线维护</p></div>
+      <div class="lc" onclick="location.href='/chart.html'"><h3>Online图表配置</h3><p>柱/线/饼图表与数据大屏</p></div>
+      <div class="lc" onclick="location.href='/ai.html'"><h3>AI 助手</h3><p>对话式写 SQL、分析性能、设计表结构</p></div>
+    </div>
+  </div>
+</div>
+<script src="/js/common.js?v=2"></script>
+<script>
+renderNav('个人工作台');
+api('/online/cgreport/head/list?pageNo=1&pageSize=1').then(function (r) { $('#kpiReport').textContent = r.total; }).catch(function(){ $('#kpiReport').textContent = '0'; });
+api('/api/datasource/list').then(function (l) { $('#kpiDs').textContent = l.length; }).catch(function () { $('#kpiDs').textContent = '0'; });
+</script>
+</body>
+</html>

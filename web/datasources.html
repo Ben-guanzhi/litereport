@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数据源管理 - LiteReport平台</title>
+<link rel="stylesheet" href="/css/app.css?v=2">
+</head>
+<body>
+<nav class="nav" id="nav"></nav>
+
+<div class="page">
+  <div class="card">
+    <div class="toolbar">
+      <button class="btn btn-primary" onclick="openCreate()">＋ 新增数据源</button>
+      <span class="grow"></span>
+      <button class="icon-btn" onclick="load()">⟳</button>
+    </div>
+    <div class="table-wrap">
+      <table class="grid" id="grid">
+        <thead><tr><th>Key</th><th>名称</th><th>类型</th><th>DSN</th><th>来源</th><th>状态</th><th style="width:170px">操作</th></tr></thead>
+        <tbody id="body"></tbody>
+      </table>
+    </div>
+    <div class="card mt16" style="padding:12px">
+      <b style="font-size:13px">系统维护（元库备份）</b>
+      <div style="margin-top:8px;display:flex;gap:10px;align-items:center">
+        <button class="btn" onclick="location.href='/api/backup/export'">⬇ 导出全量备份</button>
+        <button class="btn" onclick="$('#rstFile').click()">⬆ 恢复备份</button>
+        <input type="file" id="rstFile" accept=".json" style="display:none" onchange="doRestore(this)">
+        <span class="muted" style="font-size:12px">恢复会整表覆盖现有报表/表单/推送/数据源配置（不影响用户账号），操作前建议先导出一份。</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="mask" id="tblModal">
+  <div class="modal" style="width:760px">
+    <div class="modal-head"><span class="title" id="tblTitle">浏览表</span>
+      <button class="close" onclick="closeModal('tblModal')">✕</button></div>
+    <div class="modal-body">
+      <div style="display:flex;gap:14px">
+        <div style="width:220px;max-height:420px;overflow:auto;border:1px solid #e8e8e8;border-radius:4px" id="tblList"></div>
+        <div style="flex:1;max-height:420px;overflow:auto" id="colList"></div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal('tblModal')">关闭</button>
+    </div>
+  </div>
+</div>
+
+<div class="mask" id="dsModal">
+  <div class="modal" style="width:640px">
+    <div class="modal-head"><span class="title" id="dsTitle">新增数据源</span>
+      <button class="close" onclick="closeModal('dsModal')">✕</button></div>
+    <div class="modal-body">
+      <div class="form-row">
+        <span class="form-item"><label class="req">Key:</label><input class="input w-md mono" id="fKey" placeholder="如 mysql1"></span>
+        <span class="form-item"><label class="req">名称:</label><input class="input w-md" id="fName" placeholder="如 本地mysql"></span>
+      </div>
+      <div class="form-row">
+        <span class="form-item"><label class="req">类型:</label>
+          <select class="input w-md" id="fType">
+            <option>mysql</option><option>postgresql</option><option>oracle</option>
+            <option>sqlserver</option><option>clickhouse</option><option>sqlite</option>
+          </select></span>
+        <span class="form-item"><label class="req">DSN:</label>
+          <input class="input" style="width:360px" id="fDSN" placeholder="root:123456@tcp(127.0.0.1:3306)/db?charset=utf8mb4"></span>
+      </div>
+      <p class="muted">DSN 以 AES-GCM 加密存储；保存时会建立连接验证，验证失败不保存。</p>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="testConn()">测试连接</button>
+      <button class="btn" onclick="closeModal('dsModal')">取消</button>
+      <button class="btn btn-primary" onclick="save()">保存</button>
+    </div>
+  </div>
+</div>
+
+<script src="/js/common.js?v=2"></script>
+<script>
+renderNav('');
+var editKey = '';
+
+var table = new LiteTable({
+  table: '#grid',
+  columns: [
+    { title: 'Key', td: function (d) { return '<span class="mono">' + esc(d.key) + '</span>'; } },
+    { title: '名称', field: 'name' },
+    { title: '类型', field: 'type' },
+    { title: 'DSN', td: function (d) { return '<span class="left mono">' + esc(d.dsnMasked || '（来自 config.yaml）') + '</span>'; } },
+    { title: '来源', td: function (d) { return d.source === 'db' ? '页面管理' : 'config.yaml'; } },
+    { title: '状态', td: function (d) {
+        return d.status === 'online'
+          ? '<span style="color:#52c41a">● 在线</span>'
+          : '<span style="color:#ff4d4f">● 离线</span>';
+      } },
+    { title: '操作', td: function (d) {
+        var k = encodeURIComponent(d.key);
+        var ops = '<a href="javascript:void(0)" class="ds-browse" data-key="' + k + '">浏览表</a>';
+        if (d.source === 'db') {
+          ops = '<a href="javascript:void(0)" class="ds-edit" data-key="' + k + '">编辑</a> ' + ops +
+                ' <a href="javascript:void(0)" class="btn-link danger ds-del" data-key="' + k + '">删除</a>';
+        }
+        return ops;
+      } },
+  ],
+  emptyText: '暂无数据源',
+  fetch: function (page, size) {
+    return api('/api/datasource/all').then(function (list) {
+      list = list || [];
+      return { rows: list, total: list.length };
+    });
+  }
+});
+function load() { table.reload(); }
+function doRestore(input) {
+  var file = input.files && input.files[0];
+  input.value = '';
+  if (!file) return;
+  if (!confirm('恢复将整表覆盖现有报表/表单/推送/数据源配置（用户账号不受影响），且不可撤销。确认继续？')) return;
+  var rd = new FileReader();
+  rd.onload = function () {
+    var payload;
+    try { payload = JSON.parse(rd.result); } catch (e) { toast('备份文件不是合法JSON', 'error'); return; }
+    payload.confirm = true;
+    if (!confirm('再次确认：覆盖现有配置？')) return;
+    api('/api/backup/restore', { method: 'POST', body: payload })
+      .then(function (r) { toast('已恢复 ' + r.restoredRows + ' 行配置', 'success'); load(); })
+      .catch(function (e) { toast(e.message, 'error'); });
+  };
+  rd.readAsText(file);
+}
+$('#body').addEventListener('click', function (e) {
+  var a = e.target.closest('a');
+  if (!a) return;
+  var key = decodeURIComponent(a.dataset.key || '');
+  if (a.classList.contains('ds-edit')) edit(key);
+  else if (a.classList.contains('ds-browse')) browseTables(key);
+  else if (a.classList.contains('ds-del')) del(key);
+});
+function openCreate() {
+  editKey = '';
+  $('#dsTitle').textContent = '新增数据源';
+  $('#fKey').value = ''; $('#fKey').disabled = false;
+  $('#fName').value = ''; $('#fDSN').value = '';
+  openModal('dsModal');
+}
+function edit(key) {
+  editKey = key;
+  api('/api/datasource/all').then(function (list) {
+    var d = (list || []).find(function (x) { return x.key === key; });
+    $('#dsTitle').textContent = '编辑数据源';
+    $('#fKey').value = key; $('#fKey').disabled = true;
+    $('#fName').value = d.name || '';
+    $('#fType').value = d.type || 'mysql';
+    $('#fDSN').value = ''; $('#fDSN').placeholder = '留空表示不修改DSN';
+    openModal('dsModal');
+  }).catch(function (e) { toast(e.message, 'error'); });
+}
+function currentDSN() {
+  var dsn = $('#fDSN').value.trim();
+  if (!dsn && editKey) return { dsnEnc: true, dsn: '' }; // 编辑时留空 → 后端沿用原密文
+  return { dsnEnc: false, dsn: dsn };
+}
+function testConn() {
+  var c = currentDSN();
+  var type = $('#fType').value;
+  if (c.dsnEnc) { toast('编辑模式留空DSN时以原配置测试', 'info'); return; }
+  api('/api/datasource/test', { method: 'POST', body: { type: type, dsn: c.dsn } })
+    .then(function () { toast('连接成功', 'success'); })
+    .catch(function (e) { toast(e.message, 'error'); });
+}
+function save() {
+  var key = $('#fKey').value.trim(), name = $('#fName').value.trim(), type = $('#fType').value;
+  if (!key || !name) { toast('Key与名称必填', 'error'); return; }
+  var c = currentDSN();
+  var body = { key: key, name: name, type: type, dsn: c.dsn, dsnEnc: false };
+  if (editKey) {
+    if (c.dsnEnc) { body.dsn = ''; body.dsnEnc = true; body.keepDsn = true; }
+  } else if (!c.dsn) {
+    toast('请填写DSN', 'error'); return;
+  }
+  api('/api/datasource/save', { method: 'POST', body: body })
+    .then(function () { toast('保存成功', 'success'); closeModal('dsModal'); load(); })
+    .catch(function (e) { toast(e.message, 'error'); });
+}
+function del(key) {
+  if (!confirm('确认删除数据源 ' + key + ' 吗？')) return;
+  api('/api/datasource/' + key, { method: 'DELETE' }).then(function () { toast('已删除', 'success'); load(); })
+    .catch(function (e) { toast(e.message, 'error'); });
+}
+function browseTables(key) {
+  $('#tblTitle').textContent = '浏览表 - ' + key;
+  $('#tblList').innerHTML = '<div class=empty-tip>加载中...</div>';
+  $('#colList').innerHTML = '';
+  openModal('tblModal');
+  api('/api/datasource/tables?key=' + encodeURIComponent(key)).then(function (tables) {
+    $('#tblList').innerHTML = (tables || []).map(function (t) {
+      return '<div style="padding:6px 10px;cursor:pointer;border-bottom:1px solid #f0f0f0" onclick="showCols(\x27' + esc(key) + '\x27,\x27' + esc(t) + '\x27)">' + esc(t) + '</div>';
+    }).join('') || '<div class=empty-tip>无表</div>';
+  }).catch(function (e) { $('#tblList').innerHTML = '<div class=empty-tip>' + esc(e.message) + '</div>'; });
+}
+function showCols(key, table) {
+  $('#colList').innerHTML = '加载中...';
+  api('/api/datasource/columns?key=' + encodeURIComponent(key) + '&table=' + encodeURIComponent(table)).then(function (cols) {
+    $('#colList').innerHTML = '<table class="grid"><thead><tr><th>列名</th><th>类型</th><th></th></tr></thead><tbody>' +
+      (cols || []).map(function (c) {
+        return '<tr><td class="mono">' + esc(c.name) + '</td><td>' + esc(c.type) + '</td>' +
+          '<td><a onclick="genSql(\x27' + esc(key) + '\x27,\x27' + esc(table) + '\x27)" href="javascript:void(0)">生成SQL</a></td></tr>';
+      }).join('') + '</tbody></table>';
+  }).catch(function (e) { toast(e.message, 'error'); });
+}
+function genSql(key, table) {
+  copyText('select * from ' + table);
+}
+load();
+</script>
+</body>
+</html>

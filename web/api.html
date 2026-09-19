@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>公共接口文档 - LiteReport平台</title>
+<link rel="stylesheet" href="/css/app.css?v=2">
+</head>
+<body>
+<nav class="nav" id="nav"></nav>
+
+<div class="page" style="max-width:1100px">
+  <div class="card mb12">
+    <h2 style="margin-bottom:6px">公共在线报表接口</h2>
+    <p class="muted mb12">第三方系统（MES/ERP 等）完整接入说明见 <a href="/integrate.html">🔌集成指南</a>。</p>
+    <p class="muted">公共接口支持两种鉴权：平台登录会话（Cookie）或 API Token（<code class="mono">X-API-Token</code> 头或 <code class="mono">?token=</code> 参数，见 config.yaml 的 auth.api_tokens）。限流：公共接口默认 20次/秒/IP。所有响应统一为 <code class="mono">{success, message, code, result, timestamp}</code>，
+      <code class="mono">success=true</code> 时业务数据在 <code class="mono">result</code> 中。</p>
+  </div>
+
+  <!-- getData -->
+  <div class="api-block">
+    <div class="head"><span class="method GET">GET</span><code class="mono">/online/cgreport/api/getData/{code}</code>
+      <span class="muted">查询报表数据（分页 + 条件 + 排序 + 参数）</span></div>
+    <div class="body">
+      <table class="param-table">
+        <tr><th>参数</th><th>位置</th><th>必填</th><th>说明</th></tr>
+        <tr><td class="mono">code</td><td>路径</td><td class="tag-req">是</td><td>报表编码（如 demo_report）</td></tr>
+        <tr><td class="mono">pageNo / pageSize</td><td>query</td><td>否</td><td>页码(默认1) / 每页条数(默认10，最大100000)</td></tr>
+        <tr><td class="mono">needCount</td><td>query</td><td>否</td><td>传 <code>false</code> 跳过 COUNT 查询（total/pages 返回 -1），适合导出、大报表；分页场景服务端已带 10s COUNT 缓存</td></tr>
+        <tr><td class="mono">needSummary</td><td>query</td><td>否</td><td>传 <code>true</code> 返回合计列汇总（result.summary），对配置了“合计列”的数值字段在<b>过滤后的全量结果集</b>上求 SUM</td></tr>
+        <tr><td class="mono">column / order</td><td>query</td><td>否</td><td>排序列(须为已配置字段) / asc、desc；COUNT 查询已剥离排序开销</td></tr>
+        <tr><td class="mono">{查询字段}</td><td>query</td><td>否</td><td>报表字段配置了“查询”的条件值，按查询模式(=/like/in/between...)过滤；between 用 <code>字段_begin / 字段_end</code></td></tr>
+        <tr><td class="mono">列上筛选</td><td>query</td><td>否</td><td>任意已配置列可筛选：<code>列=值</code> 精确、<code>列_like</code> 模糊、<code>列_in=a,b</code> 枚举、<code>列_bw=a,b</code> 区间、<code>列_ne/_gt/_ge/_lt/_le</code> 比较，与查询区条件叠加</td></tr>
+        <tr><td class="mono">{报表参数}</td><td>query</td><td>否</td><td>SQL 中 <code>${name}</code> 参数的值，未传时使用参数默认值</td></tr>
+      </table>
+      <pre class="code">GET /online/cgreport/api/getData/demo_report?pageNo=1&amp;pageSize=10&amp;name=王&amp;column=punch_time&amp;order=desc
+
+// 响应
+{
+  "success": true, "message": "操作成功", "code": 200,
+  "result": {
+    "records": [ { "id": "demo0004", "name": "王五5", "sex": "男", ... } ],
+    "total": 6, "size": 10, "current": 1, "pages": 1,
+    "summary": { "salary_money": 2453.45, "age": 67 }
+  },
+  "timestamp": 1757076000000
+}</pre>
+    </div>
+  </div>
+
+  <!-- getColumns -->
+  <div class="api-block">
+    <div class="head"><span class="method GET">GET</span><code class="mono">/online/cgreport/api/getColumns/{code}</code>
+      <span class="muted">查询报表字段配置（渲染报表用）</span></div>
+    <div class="body">
+      <pre class="code plain">result: { head: {...}, fields: [ { fieldName, fieldTxt, fieldType, isShow, isQuery, queryMode, ... } ], params: [ { paramName, paramTxt, paramValue } ], columns: [...] }</pre>
+    </div>
+  </div>
+
+  <!-- getInfo -->
+  <div class="api-block">
+    <div class="head"><span class="method GET">GET</span><code class="mono">/online/cgreport/api/getInfo/{code或id}</code>
+      <span class="muted">查询报表完整配置（头 + 字段 + 参数）</span></div>
+  </div>
+
+  <!-- saveData -->
+  <div class="api-block">
+    <div class="head"><span class="method POST">POST</span><code class="mono">/online/cgreport/api/saveData/{code}</code>
+      <span class="muted">公共保存：新增 / 修改报表对应数据表的数据</span></div>
+    <div class="body">
+      <p class="mb12">保存目标表 = 报表SQL 解析出的主表（也可用 <code class="mono">table</code> 显式指定）。
+        <b>data.id 有值且存在 → UPDATE；否则 INSERT（id 自动生成）。</b>字段名必须是合法表字段。</p>
+      <pre class="code">POST /online/cgreport/api/saveData/demo_report
+Content-Type: application/json
+
+{
+  "data": { "id": "", "name": "新用户", "sex": "男", "age": 25, "salary_money": 888.88 }
+}
+
+// 批量保存
+{ "dataList": [ {...}, {...} ] }
+
+// 响应
+{ "success": true, "result": { "saved": 1, "ids": ["3f2a..."] } }</pre>
+    </div>
+  </div>
+
+  <!-- importExcel -->
+  <div class="api-block">
+    <div class="head"><span class="method POST">POST</span><code class="mono">/online/cgreport/api/importExcel/{code}</code>
+      <span class="muted">导入 Excel：按表头批量写回报表主表</span></div>
+    <div class="body">
+      <p class="mb12">multipart/form-data，文件字段名 <code class="mono">file</code>（.xlsx，≤5MB）。
+        <b>首行为表头，按报表字段名匹配（大小写不敏感，未知列忽略）</b>；数据行批量写回（事务，任一行失败整体回滚）。
+        行内 <code class="mono">id</code> 有值且存在则更新，否则新增。</p>
+      <pre class="code">curl -X POST -H "X-API-Token: demo-token-123"   -F "file=@数据.xlsx"   http://localhost:8085/online/cgreport/api/importExcel/demo_report
+
+// 响应 result: { "imported": 100 }</pre>
+    </div>
+  </div>
+
+  <!-- deleteData -->
+  <div class="api-block">
+    <div class="head"><span class="method DELETE">DELETE</span><code class="mono">/online/cgreport/api/deleteData/{code}</code>
+      <span class="muted">公共删除：按主键 id 删除数据</span></div>
+    <div class="body">
+      <pre class="code">POST /online/cgreport/api/deleteData/demo_report        （DELETE 方法等价）
+{ "ids": ["demo0001", "demo0002"] }
+
+// 或 query 方式：?id=demo0001,demo0002
+// 响应 result: { "deleted": 2 }</pre>
+    </div>
+  </div>
+
+  <!-- getDataNoPage -->
+  <div class="api-block">
+    <div class="head"><span class="method GET">GET</span><code class="mono">/online/cgreport/api/getDataNoPage/{code}</code>
+      <span class="muted">查询全部数据（不分页、跳过 COUNT，内部上限10万条，total 返回 -1）</span></div>
+  </div>
+
+  <!-- 调试台 -->
+  <div class="api-block">
+    <div class="head"><span class="method GET">TRY</span><b>在线调试台</b></div>
+    <div class="body">
+      <div class="form-row">
+        <span class="form-item"><label>报表编码:</label><select class="input w-md" id="tryCode"><option value="">加载中...</option></select></span>
+        <span class="form-item"><label>接口:</label>
+          <select class="input w-md" id="tryApi">
+            <option value="getData">getData 查询数据</option>
+            <option value="getColumns">getColumns 字段配置</option>
+            <option value="getInfo">getInfo 完整配置</option>
+          </select></span>
+        <span class="form-item"><label>查询串:</label><input class="input w-lg mono" id="tryQs" placeholder="pageNo=1&pageSize=10&name=王"></span>
+        <span class="form-item"><label>Token:</label><input class="input w-md mono" id="tryToken" placeholder="X-API-Token（可选）"></span>
+        <button class="btn btn-primary" onclick="tryRun()">执 行</button>
+      </div>
+      <pre class="code" id="tryOut" style="min-height:120px">// 响应将显示在这里</pre>
+    </div>
+  </div>
+</div>
+
+<script src="/js/common.js?v=2"></script>
+<script>
+renderNav('');
+api('/online/cgreport/head/list?pageNo=1&pageSize=100').then(function (r) {
+  $('#tryCode').innerHTML = (r.records || []).map(function (h) {
+    return '<option value="' + esc(h.reportCode) + '"' + (h.reportCode === new URLSearchParams(location.search).get('code') ? ' selected' : '') + '>' +
+      esc(h.reportName) + ' (' + esc(h.reportCode) + ')</option>';
+  }).join('') || '<option value="">暂无报表</option>';
+});
+function tryRun() {
+  var code = $('#tryCode').value, apiName = $('#tryApi').value, qs = $('#tryQs').value.trim();
+  if (!code) { toast('请先选择报表', 'error'); return; }
+  var url = '/online/cgreport/api/' + apiName + '/' + encodeURIComponent(code) + (qs ? '?' + qs : '');
+  $('#tryOut').textContent = '// GET ' + url + '\n// 请求中...';
+  var init = { headers: {} };
+  var tk = document.getElementById('tryToken').value.trim();
+  if (tk) init.headers['X-API-Token'] = tk;
+  fetch(url, init).then(function (res) { return res.json(); }).then(function (r) {
+    $('#tryOut').textContent = '// GET ' + url + '\n\n' + JSON.stringify(r, null, 2);
+  }).catch(function (e) { $('#tryOut').textContent = '// 请求失败: ' + e.message; });
+}
+</script>
+</body>
+</html>

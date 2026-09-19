@@ -1,0 +1,4 @@
+data/
+*.exe
+.git/
+README.md

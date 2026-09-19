@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数据大屏 - LiteReport平台</title>
+<link rel="stylesheet" href="/css/app.css?v=2">
+<style>
+  body { background: #0b1c2c; color: #cfe8ef; }
+  .bs-header { text-align: center; padding: 18px 0 6px; }
+  .bs-header h1 { color: #35e0d0; font-size: 26px; letter-spacing: 6px; }
+  .bs-header .clock { color: #7fb8c4; font-size: 13px; }
+  .bs-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(480px, 1fr)); gap: 14px; padding: 14px 22px 26px; }
+  .bs-item { background: rgba(19, 168, 168, .08); border: 1px solid rgba(53, 224, 208, .25); border-radius: 8px; padding: 8px; }
+  .bs-item .t { color: #35e0d0; font-size: 14px; padding: 4px 8px; }
+  .bs-item .c { width: 100%; height: 320px; }
+  a.back { color: #7fb8c4; position: fixed; right: 20px; top: 16px; }
+</style>
+</head>
+<body>
+<div class="bs-header"><h1>LiteReport 数据大屏</h1><div class="clock" id="clock"></div></div>
+<a class="back" href="/chart.html">← 返回图表配置</a>
+<div class="bs-grid" id="grid"></div>
+<script src="/lib/echarts.min.js"></script>
+<script>
+// 本地转义（大屏页不引入 common.js）
+function esc(s) {
+  if (s === null || s === undefined) return '';
+  return String(s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+function tick() {
+  document.getElementById('clock').textContent = new Date().toLocaleString('zh-CN');
+}
+setInterval(tick, 1000); tick();
+
+fetch('/api/chart/list', { headers: { 'Content-Type': 'application/json' } }).then(function (r) { return r.json(); }).then(function (res) {
+  if (res.code === 401) { location.href = '/login.html'; return; }
+  if (!res.success) return;
+  var list = res.result || [];
+  var grid = document.getElementById('grid');
+  if (!list.length) {
+    grid.innerHTML = '<div class="bs-item" style="padding:30px">暂无图表，请先在图表配置中创建</div>';
+    return;
+  }
+  list.forEach(function (c) {
+    var div = document.createElement('div');
+    div.className = 'bs-item';
+    // chartName 来自用户配置，必须转义后再入 HTML（防存储型 XSS）
+    div.innerHTML = '<div class="t">' + esc(c.chartName) + '</div><div class="c" id="c_' + esc(c.id) + '"></div>';
+    grid.appendChild(div);
+    var chart = echarts.init(document.getElementById('c_' + c.id));
+    var loadChart = function () {
+      fetch('/online/cgreport/api/getChartData/' + encodeURIComponent(c.reportCode) +
+          '?dim=' + encodeURIComponent(c.dimField) + '&measure=' + encodeURIComponent(c.measureField || '') +
+          '&agg=' + (c.agg || 'sum') + '&limit=15', { headers: { 'Content-Type': 'application/json' } })
+        .then(function (r) { return r.json(); })
+        .then(function (r) {
+          var pts = (r.result && r.result.points) || [];
+          var names = pts.map(function (p) { return p.name; });
+          var option;
+          if (c.chartType === 'pie') {
+            option = { tooltip: { trigger: 'item' }, series: [{ type: 'pie', radius: '62%', data: pts }] };
+          } else {
+            option = {
+              tooltip: {},
+              xAxis: { type: 'category', data: names, axisLabel: { color: '#9fc9d4', rotate: 30 } },
+              yAxis: { type: 'value', axisLabel: { color: '#9fc9d4' }, splitLine: { lineStyle: { color: 'rgba(53,224,208,.15)' } } },
+              series: [{ type: c.chartType || 'bar', data: pts.map(function (p) { return p.value; }), itemStyle: { color: '#35e0d0' } }]
+            };
+          }
+          chart.setOption(option);
+        })
+        .catch(function () {
+          chart.setOption({ title: { text: '数据加载失败', textStyle: { color: '#ff6b6b', fontSize: 14 }, left: 'center', top: 'middle' } });
+        });
+    };
+    loadChart();
+    // 大屏场景定时刷新（30s）
+    setInterval(loadChart, 30000);
+    window.addEventListener('resize', function () { chart.resize(); });
+  });
+});
+</script>
+</body>
+</html>

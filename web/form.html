@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Online表单开发 - LiteReport平台</title>
+<link rel="stylesheet" href="/css/app.css?v=2">
+</head>
+<body>
+<nav class="nav" id="nav"></nav>
+
+<div class="page" style="max-width:1200px">
+  <div class="card mb12">
+    <div class="toolbar">
+      <button class="btn btn-primary" onclick="openCreate()">＋ 新建表单（建表向导）</button>
+      <span class="grow"></span>
+      <button class="icon-btn" onclick="load()">⟳</button>
+    </div>
+    <div class="table-wrap">
+      <table class="grid" id="grid">
+        <thead><tr><th>表单名称</th><th>数据表</th><th>字段数</th><th>创建人</th><th>创建时间</th><th style="width:200px">操作</th></tr></thead>
+        <tbody id="body"></tbody>
+      </table>
+    </div>
+    <p class="muted mt8">建表向导自动创建数据表并生成同名报表配置，「维护数据」即在 AUTO在线报表 页面进行新增/修改/删除（走公共保存接口）。</p>
+  </div>
+</div>
+
+<div class="mask" id="formModal">
+  <div class="modal" style="width:860px">
+    <div class="modal-head"><span class="title">新建表单</span>
+      <button class="close" onclick="closeModal('formModal')">✕</button></div>
+    <div class="modal-body">
+      <div class="form-row">
+        <span class="form-item"><label class="req">表单名称:</label><input class="input w-md" id="fName" placeholder="如 员工信息"></span>
+        <span class="form-item"><label class="req">数据表名:</label><input class="input w-md mono" id="fTable" placeholder="如 emp_info"></span>
+      </div>
+      <div class="toolbar"><button class="btn btn-primary btn-sm" onclick="addField()">＋ 添加字段</button></div>
+      <div class="grid-edit">
+        <table class="edit" style="min-width:640px">
+          <thead><tr><th style="width:36px">#</th><th>字段名</th><th>标签</th><th>类型</th><th style="width:70px">必填</th><th style="width:44px">操作</th></tr></thead>
+          <tbody id="fieldsBody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal('formModal')">取消</button>
+      <button class="btn btn-primary" onclick="create()">创建表单并建表</button>
+    </div>
+  </div>
+</div>
+
+<script src="/js/common.js?v=2"></script>
+<script>
+renderNav('Online表单开发');
+var fields = [];
+
+var table = new LiteTable({
+  table: '#grid',
+  columns: [
+    { title: '表单名称', field: 'formName' },
+    { title: '数据表', td: function (f) { return '<span class="mono">' + esc(f.tableName) + '</span>'; } },
+    { title: '字段数', td: function (f) {
+        var fc = [];
+        try { fc = JSON.parse(f.fieldsJson || '[]'); } catch (e) {}
+        return String(fc.length);
+      } },
+    { title: '创建人', field: 'createBy' },
+    { title: '创建时间', field: 'createTime' },
+    { title: '操作', td: function (f) {
+        return '<a href="/online/cgreport/form_' + encodeURIComponent(f.tableName.toLowerCase()) + '" target="_blank">维护数据</a> ' +
+          '<a href="javascript:void(0)" class="btn-link danger f-del" data-id="' + f.id + '">删除配置</a>';
+      } },
+  ],
+  emptyText: '暂无表单，点击「新建表单」创建',
+  fetch: function (page, size) {
+    return api('/online/cgform/list').then(function (list) {
+      list = list || [];
+      return { rows: list, total: list.length };
+    });
+  }
+});
+function load() { table.reload(); }
+$('#body').addEventListener('click', function (e) {
+  var a = e.target.closest('a');
+  if (a && a.classList.contains('f-del')) del(a.dataset.id);
+});
+function openCreate() {
+  $('#fName').value = ''; $('#fTable').value = '';
+  fields = [{ name: 'title', label: '标题', type: 'text', required: true }];
+  renderFields();
+  openModal('formModal');
+}
+function addField() {
+  fields.push({ name: '', label: '', type: 'text', required: false });
+  renderFields();
+}
+function renderFields() {
+  $('#fieldsBody').innerHTML = fields.map(function (f, i) {
+    return '<tr><td>' + (i + 1) + '</td>' +
+      '<td><input type="text" value="' + esc(f.name) + '" oninput="fields[' + i + '].name=this.value"></td>' +
+      '<td><input type="text" value="' + esc(f.label) + '" oninput="fields[' + i + '].label=this.value"></td>' +
+      '<td><select onchange="fields[' + i + '].type=this.value">' +
+        ['text|文本', 'number|数值', 'date|日期'].map(function (o) {
+          var p = o.split('|');
+          return '<option value="' + p[0] + '"' + (f.type === p[0] ? ' selected' : '') + '>' + p[1] + '</option>';
+        }).join('') + '</select></td>' +
+      '<td><input type="checkbox" ' + (f.required ? 'checked' : '') + ' onchange="fields[' + i + '].required=this.checked"></td>' +
+      '<td><a class="btn-link danger" onclick="fields.splice(' + i + ',1);renderFields()">删除</a></td></tr>';
+  }).join('');
+}
+function create() {
+  var body = {
+    formName: $('#fName').value.trim(),
+    tableName: $('#fTable').value.trim(),
+    fields: fields.filter(function (f) { return f.name && f.label; })
+  };
+  if (!body.formName || !body.tableName || !body.fields.length) { toast('表单名称/表名/至少一个完整字段必填', 'error'); return; }
+  api('/online/cgform/create', { method: 'POST', body: body }).then(function (r) {
+    toast(r.existed ? '数据表已存在，已关联' : '创建成功', 'success');
+    closeModal('formModal');
+    load();
+    if (r.reportCode) window.open('/online/cgreport/' + r.reportCode);
+  }).catch(function (e) { toast(e.message, 'error'); });
+}
+function del(id) {
+  if (!confirm('仅删除表单配置（数据表保留），确认？')) return;
+  api('/online/cgform/' + id, { method: 'DELETE' }).then(function () { toast('已删除', 'success'); load(); }).catch(function (e) { toast(e.message, 'error'); });
+}
+load();
+</script>
+</body>
+</html>

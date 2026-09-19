@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AUTO在线报表 - LiteReport平台</title>
+<style>
+  /* 打印：隐藏操作区，仅输出表格 */
+  @media print {
+    .nav, .toolbar, .search-bar, .pager, .tip-bar, .muted, .icon-btn, select, button { display: none !important; }
+    .page { padding: 0; max-width: none; }
+    .card { border: none; box-shadow: none; padding: 0; }
+    table.grid { font-size: 12px; }
+    table.grid th, table.grid td { border: 1px solid #999; }
+  }
+</style>
+<link rel="stylesheet" href="/css/app.css?v=2">
+</head>
+<body>
+<nav class="nav" id="nav"></nav>
+
+<div class="page" style="max-width:1500px">
+  <div class="card">
+    <!-- 工具条 -->
+    <div class="toolbar">
+      <button class="btn" onclick="exportCsv()">⎘ 导出CSV</button>
+      <button class="btn" onclick="exportExcel()">⎘ 导出Excel</button>
+      <button class="btn" onclick="openSave(null)">＋ 新增</button>
+      <button class="btn" onclick="openSaveSelected()">✎ 修改</button>
+      <button class="btn btn-danger" onclick="delSelected()">🗑 删除</button>
+      <button class="btn" onclick="openCross()">⊞ 交叉表</button>
+      <button class="btn" onclick="openGroupSum()">Σ 分组汇总</button>
+      <div class="btn-group" style="position:relative;display:inline-block">
+        <button class="btn" onclick="toggleExport()">⎘ 导出 ⌄</button>
+        <div id="exportMenu" class="more-menu" style="display:none;position:absolute;right:0;top:32px;background:#fff;border:1px solid #e8e8e8;border-radius:4px;box-shadow:0 4px 12px rgba(0,0,0,.12);z-index:30;min-width:130px">
+          <a onclick="exportCsv()">导出 CSV</a>
+          <a onclick="exportExcel()">导出 Excel</a>
+          <a onclick="exportJson()">导出 JSON</a>
+          <a onclick="exportSQL()">导出 SQL Insert</a>
+          <a onclick="$('#impExcel').click()">导入 Excel</a>
+        </div>
+      </div>
+      <input type="file" id="impExcel" accept=".xlsx" style="display:none" onchange="doImportExcel(this)">
+      <span class="grow"></span>
+      <select class="input" id="autoRefresh" style="width:110px" onchange="setAutoRefresh(this.value)" title="定时自动刷新">
+        <option value="0">不自动刷新</option>
+        <option value="10">每10秒刷新</option>
+        <option value="30">每30秒刷新</option>
+        <option value="60">每60秒刷新</option>
+      </select>
+      <button class="icon-btn" title="刷新" onclick="loadData()">⟳</button>
+      <button class="icon-btn" title="打印" onclick="window.print()">🖨</button>
+      <button class="icon-btn" title="公共接口文档" onclick="window.open('/api.html?code=' + code)">⚙</button>
+    </div>
+
+    <div class="alert-info"><span class="dot">i</span><span id="selTip">未选中任何数据</span></div>
+
+    <!-- 动态查询区 -->
+    <div class="query-area" id="queryArea" style="display:none"></div>
+    <script>
+    // 查询区输入框回车触发查询
+    (function () {
+      var bar = document.getElementById('queryArea');
+      bar.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' && e.target.tagName === 'INPUT') { e.preventDefault(); loadData(1); }
+      });
+    })();
+    </script>
+
+    <div class="table-wrap">
+      <table class="grid" id="dataTable">
+        <thead id="tableHead"></thead>
+        <tbody id="tableBody"></tbody>
+        <tfoot id="tableFoot"></tfoot>
+      </table>
+    </div>
+
+    <div class="pager">
+      <span class="total">共 <b id="total">0</b> 条数据</span>
+      <div class="pages" id="pages"></div>
+      <select class="input" style="width:100px;height:30px" id="pageSize" onchange="loadData(1)">
+        <option>10条/页</option><option>20条/页</option><option>50条/页</option><option>100条/页</option>
+      </select>
+    </div>
+  </div>
+
+  <p class="muted mt8">数据来源：公共查询接口 <code class="mono" id="apiUrl" style="cursor:pointer" onclick="copyText(this.textContent)" title="点击复制"></code>，保存使用 <code class="mono">POST /online/cgreport/api/saveData/{code}</code></p>
+</div>
+
+<!-- ═════════ 交叉表/分组汇总 弹窗 ═════════ -->
+<div class="mask" id="pvtModal">
+  <div class="modal" style="width:820px">
+    <div class="modal-head"><span class="title" id="pvtTitle">交叉表</span>
+      <button class="close" onclick="closeModal('pvtModal')">✕</button></div>
+    <div class="modal-body">
+      <div class="form-row">
+        <span class="form-item"><label>行字段:</label><select class="input w-md" id="pvRow"></select></span>
+        <span class="form-item" id="pvColWrap"><label>列字段:</label><select class="input w-md" id="pvCol"></select></span>
+        <span class="form-item"><label>度量:</label><select class="input w-md" id="pvMeasure"></select></span>
+        <span class="form-item"><label>聚合:</label>
+          <select class="input w-md" id="pvAgg">
+            <option value="sum">SUM</option><option value="count">COUNT</option>
+            <option value="avg">AVG</option><option value="max">MAX</option><option value="min">MIN</option>
+          </select></span>
+        <button class="btn btn-primary btn-sm" onclick="runPivot()">分 析</button>
+      </div>
+      <div class="table-wrap" id="pvtBody"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═════════ 列筛选下拉面板 ═════════ -->
+<div class="col-filter-panel" id="cfPanel">
+  <div class="cf-title" id="cfTitle">筛选</div>
+  <div class="cf-row"><select id="cfMode" onchange="cfModeChanged()"></select></div>
+  <div class="cf-row"><input id="cfV1" placeholder="值"></div>
+  <div class="cf-row" style="display:none"><input id="cfV2" placeholder="结束值"></div>
+  <div class="cf-actions">
+    <button class="btn btn-primary btn-sm" onclick="applyColFilter()">筛 选</button>
+    <button class="btn btn-sm" onclick="clearColFilter()">清除</button>
+  </div>
+</div>
+
+<!-- ═════════ 数据保存弹窗（公共保存接口演示）═════════ -->
+<div class="mask" id="saveModal">
+  <div class="modal" style="width:640px">
+    <div class="modal-head"><span class="title" id="saveTitle">新增数据（公共保存接口）</span>
+      <button class="close" onclick="closeModal('saveModal')">✕</button></div>
+    <div class="modal-body">
+      <p class="muted mb12">等价请求：<code class="mono" id="saveApi"></code></p>
+      <textarea class="sql-area" id="saveJson" style="width:100%;min-height:220px"></textarea>
+      <p class="muted mt8">JSON 中 <b>id</b> 有值且存在则更新，否则新增（id 留空自动生成）。字段名需为报表查询结果中的列。</p>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal('saveModal')">取消</button>
+      <button class="btn btn-primary" onclick="doSave()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 行详情抽屉（点击行打开） -->
+<div class="mask" id="rowModal" style="align-items:flex-start;justify-content:flex-end">
+  <div class="modal" style="width:480px;max-width:96vw;border-radius:8px 0 0 8px;height:100vh;max-height:100vh;margin:0">
+    <div class="modal-head"><span class="title">行详情 <span class="muted" id="rowMeta"></span></span>
+      <button class="close" onclick="closeModal('rowModal')">✕</button></div>
+    <div class="modal-body" id="rowBody" style="padding:0;overflow:auto"></div>
+  </div>
+</div>
+
+<!-- 危险SQL 二次确认（试运行触发） -->
+<div class="mask" id="dangerModal">
+  <div class="modal narrow">
+    <div class="modal-head"><span class="title" style="color:#ff4d4f">⚠ 危险SQL 确认</span>
+      <button class="close" onclick="closeModal('dangerModal')">✕</button></div>
+    <div class="modal-body">
+      <p>检测到以下危险特征：</p>
+      <ul id="dangerList" style="margin:8px 0 16px 20px;color:#ff4d4f"></ul>
+      <p class="muted">如确认执行（可能修改/读取服务器文件、注入等），请勾选并点击确认。</p>
+      <label class="form-item"><input type="checkbox" id="dangerAck"> 我已了解风险，仍要执行</label>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal('dangerModal')">取消</button>
+      <button class="btn btn-primary" onclick="confirmDanger()">确认执行</button>
+    </div>
+  </div>
+</div>
+
+<script src="/js/common.js?v=2"></script>
+<script src="/js/cgreport-app.js?v=1"></script>
+</body>
+</html>

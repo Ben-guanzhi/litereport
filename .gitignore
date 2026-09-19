@@ -1,0 +1,15 @@
+# 编译产物
+*.exe
+*.exe~
+litereport
+/dist/
+
+# 运行时数据（SQLite 元数据库及 WAL/SHM）
+/data/
+
+# 本地环境与编辑器
+.env
+.idea/
+.vscode/
+*.swp
+.DS_Store

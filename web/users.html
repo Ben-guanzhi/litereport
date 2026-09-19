@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>用户与角色 - LiteReport平台</title>
+<link rel="stylesheet" href="/css/app.css?v=2">
+</head>
+<body>
+<nav class="nav" id="nav"></nav>
+<div class="page" style="max-width:1100px">
+  <div class="card">
+    <h2 style="margin-bottom:6px">用户与角色</h2>
+    <p class="muted">三种角色：
+      <b>admin</b> 全权限（仅显示在管理入口）/ <b>editor</b> 可配置报表/数据源查看/图表/表单/推送 /
+      <b>viewer</b> 只读公共接口。修改密码会立即吊销该用户所有会话（强制重新登录）。</p>
+    <div class="toolbar mt16">
+      <button class="btn btn-primary" onclick="openCreate()">＋ 新增用户</button>
+      <span class="grow"></span>
+      <button class="icon-btn" onclick="load()">⟳</button>
+    </div>
+    <div class="table-wrap">
+      <table class="grid" id="grid">
+        <thead><tr><th>用户名</th><th>角色</th><th>来源</th><th style="width:150px">操作</th></tr></thead>
+        <tbody id="body"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="mask" id="userModal">
+  <div class="modal narrow">
+    <div class="modal-head"><span class="title" id="umTitle">新增用户</span>
+      <button class="close" onclick="closeModal('userModal')">✕</button></div>
+    <div class="modal-body">
+      <div class="form-item mb12"><label class="req">用户名:</label>
+        <input class="input w-md mono" id="fName" placeholder="如 editor01"></div>
+      <div class="form-item mb12"><label>初始密码(≥6位):</label>
+        <input type="password" class="input w-md" id="fPwd" placeholder="新用户必填，已存在用户留空则不改"></div>
+      <div class="form-item"><label class="req">角色:</label>
+        <select class="input w-md" id="fRole">
+          <option value="admin">admin（全权限）</option>
+          <option value="editor" selected>editor（编辑者）</option>
+          <option value="viewer">viewer（只读）</option>
+        </select></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal('userModal')">取消</button>
+      <button class="btn btn-primary" onclick="save()">保存</button>
+    </div>
+  </div>
+</div>
+
+<script src="/js/common.js?v=2"></script>
+<script>
+renderNav('');
+var editName = '';
+
+var table = new LiteTable({
+  table: '#grid',
+  columns: [
+    { title: '用户名', td: function (u) { return '<span class="mono">' + esc(u.name) + '</span>'; } },
+    { title: '角色', field: 'role' },
+    { title: '来源', td: function (u) { return u.source === 'db' ? '平台用户表' : 'config.yaml'; } },
+    { title: '操作', td: function (u) {
+        // 用户名经 data-* 传递，不拼进行内 JS
+        var ops = '<a href="javascript:void(0)" class="u-edit" data-name="' + esc(u.name) + '" data-role="' + esc(u.role) + '">编辑</a>';
+        if (u.source === 'db') ops += ' <a href="javascript:void(0)" class="btn-link danger u-del" data-name="' + esc(u.name) + '">删除</a>';
+        else ops += ' <span class="muted">配置文件管理</span>';
+        return ops;
+      } },
+  ],
+  emptyText: '暂无用户',
+  fetch: function (page, size) {
+    return api('/api/users').then(function (list) {
+      list = list || [];
+      return { rows: list, total: list.length };
+    });
+  }
+});
+function load() { table.reload(); }
+$('#body').addEventListener('click', function (e) {
+  var a = e.target.closest('a');
+  if (!a) return;
+  if (a.classList.contains('u-edit')) editU(a.dataset.name, a.dataset.role);
+  else if (a.classList.contains('u-del')) delU(a.dataset.name);
+});
+function openCreate() {
+  editName = '';
+  $('#umTitle').textContent = '新增用户';
+  $('#fName').value = ''; $('#fName').disabled = false;
+  $('#fPwd').value = ''; $('#fRole').value = 'editor';
+  openModal('userModal');
+}
+function editU(name, role) {
+  editName = name;
+  $('#umTitle').textContent = '编辑用户：' + name;
+  $('#fName').value = name; $('#fName').disabled = true;
+  $('#fPwd').value = ''; $('#fRole').value = role;
+  openModal('userModal');
+}
+function save() {
+  var body = {
+    name: $('#fName').value.trim(),
+    password: $('#fPwd').value,
+    role: $('#fRole').value
+  };
+  if (!body.name) { toast('请填写用户名', 'error'); return; }
+  api('/api/users/save', { method: 'POST', body: body })
+    .then(function () { toast('已保存', 'success'); closeModal('userModal'); load(); })
+    .catch(function (e) { toast(e.message, 'error'); });
+}
+function delU(name) {
+  if (name === 'admin') { toast('admin 为内置账号，请通过 config.yaml 维护', 'error'); return; }
+  if (!confirm('确认删除用户 ' + name + ' 吗？其会话将立即失效')) return;
+  api('/api/users/' + encodeURIComponent(name), { method: 'DELETE' })
+    .then(function () { toast('已删除', 'success'); load(); })
+    .catch(function (e) { toast(e.message, 'error'); });
+}
+load();
+</script>
+</body>
+</html>

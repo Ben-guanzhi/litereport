@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>字典管理 - LiteReport平台</title>
+<link rel="stylesheet" href="/css/app.css?v=2">
+</head>
+<body>
+<nav class="nav" id="nav"></nav>
+
+<div class="page">
+  <div class="card">
+    <div class="search-bar">
+      <span class="form-item"><label>字典编码:</label>
+        <input class="input w-md mono" id="qCode" placeholder="如 log_type"></span>
+      <button class="btn btn-primary" onclick="load()">🔍 查询</button>
+      <button class="btn" onclick="document.getElementById('qCode').value='';load()">↻ 重置</button>
+      <span class="grow"></span>
+      <button class="btn btn-primary" onclick="openCreate()">＋ 新增字典项</button>
+    </div>
+    <div class="table-wrap">
+      <table class="grid" id="grid">
+        <thead><tr><th>字典编码</th><th>标签</th><th>值</th><th>排序</th><th style="width:130px">操作</th></tr></thead>
+        <tbody id="body"></tbody>
+      </table>
+    </div>
+    <p class="muted mt8">报表字段明细中配置「字典code」后，AUTO在线报表的列显示与查询区自动做值↔标签翻译。</p>
+  </div>
+</div>
+
+<div class="mask" id="dictModal">
+  <div class="modal narrow">
+    <div class="modal-head"><span class="title" id="dmTitle">新增字典项</span>
+      <button class="close" onclick="closeModal('dictModal')">✕</button></div>
+    <div class="modal-body">
+      <div class="form-item mb12"><label class="req">字典编码:</label>
+        <input class="input w-md mono" id="dCode" placeholder="如 sex"></div>
+      <div class="form-item mb12"><label class="req">标签:</label>
+        <input class="input w-md" id="dLabel" placeholder="如 男"></div>
+      <div class="form-item mb12"><label class="req">值:</label>
+        <input class="input w-md mono" id="dValue" placeholder="如 M"></div>
+      <div class="form-item"><label>排序:</label>
+        <input class="input w-md mono" id="dOrder" value="0"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal('dictModal')">取消</button>
+      <button class="btn btn-primary" onclick="save()">保存</button>
+    </div>
+  </div>
+</div>
+
+<script src="/js/common.js?v=2"></script>
+<script>
+renderNav('字典管理');
+var editId = '';
+
+var table = new LiteTable({
+  table: '#grid',
+  columns: [
+    { title: '字典编码', td: function (d) { return '<span class="mono">' + esc(d.dictCode) + '</span>'; } },
+    { title: '标签', field: 'label' },
+    { title: '值', td: function (d) { return '<span class="mono">' + esc(d.value) + '</span>'; } },
+    { title: '排序', field: 'orderNum' },
+    { title: '操作', td: function (d) {
+        return '<a href="javascript:void(0)" class="d-edit" data-id="' + d.id + '">编辑</a> ' +
+          '<a href="javascript:void(0)" class="btn-link danger d-del" data-id="' + d.id + '">删除</a>';
+      } },
+  ],
+  emptyText: '暂无字典',
+  fetch: function (page, size) {
+    return api('/api/dict/list?dictCode=' + encodeURIComponent($('#qCode').value)).then(function (list) {
+      window._dictList = list || [];
+      return { rows: window._dictList, total: window._dictList.length };
+    });
+  }
+});
+function load() { table.reload(); }
+$('#body').addEventListener('click', function (e) {
+  var a = e.target.closest('a');
+  if (!a) return;
+  var d = (window._dictList || []).find(function (x) { return x.id === a.dataset.id; });
+  if (a.classList.contains('d-edit')) editItem(d);
+  else if (a.classList.contains('d-del')) del(a.dataset.id);
+});
+function openCreate() {
+  editId = '';
+  $('#dmTitle').textContent = '新增字典项';
+  $('#dCode').value = $('#qCode').value; $('#dLabel').value = ''; $('#dValue').value = ''; $('#dOrder').value = 0;
+  openModal('dictModal');
+}
+function editItem(d) {
+  editId = d.id;
+  $('#dmTitle').textContent = '编辑字典项';
+  $('#dCode').value = d.dictCode; $('#dLabel').value = d.label; $('#dValue').value = d.value; $('#dOrder').value = d.orderNum;
+  openModal('dictModal');
+}
+function save() {
+  var body = {
+    id: editId,
+    dictCode: $('#dCode').value.trim(),
+    label: $('#dLabel').value.trim(),
+    value: $('#dValue').value.trim(),
+    orderNum: parseInt($('#dOrder').value) || 0
+  };
+  if (!body.dictCode || !body.label || body.value === '') { toast('编码/标签/值必填', 'error'); return; }
+  api('/api/dict/save', { method: 'POST', body: body }).then(function () {
+    toast('已保存', 'success'); closeModal('dictModal'); load();
+  }).catch(function (e) { toast(e.message, 'error'); });
+}
+function del(id) {
+  if (!confirm('确认删除该字典项？')) return;
+  api('/api/dict/' + id, { method: 'DELETE' }).then(function () { toast('已删除', 'success'); load(); }).catch(function (e) { toast(e.message, 'error'); });
+}
+load();
+</script>
+</body>
+</html>

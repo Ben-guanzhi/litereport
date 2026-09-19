@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>集成指南 - LiteReport平台</title>
+<link rel="stylesheet" href="/css/app.css?v=2">
+</head>
+<body>
+<nav class="nav" id="nav"></nav>
+
+<div class="page" style="max-width:1100px">
+  <div class="card mb12">
+    <h2 style="margin-bottom:6px">第三方系统集成指南（MES / ERP / WMS 等）</h2>
+    <p class="muted">LiteReport 为第三方系统提供两种对接通道：<b>公共 API</b>（数据查询/写入/导出/聚合，Token 鉴权）与<b>页面嵌入</b>（报表页 iframe）。
+      所有公共接口统一响应 <code class="mono">{success, message, code, result, timestamp}</code>，<code class="mono">success=true</code> 时业务数据在 <code class="mono">result</code>。</p>
+  </div>
+
+  <!-- 前置准备 -->
+  <div class="api-block">
+    <div class="head"><span class="method GET">STEP</span><b>0. 前置准备（一次性）</b></div>
+    <div class="body">
+      <table class="param-table">
+        <tr><th>事项</th><th>说明</th></tr>
+        <tr><td>网络</td><td>MES 服务器能访问 LiteReport 端口（默认 8085，可经网关反代）</td></tr>
+        <tr><td>令牌</td><td>在 LiteReport 服务器 <code class="mono">config.yaml → auth.api_tokens</code> 为 MES 分配专用 Token（建议独立、定期轮换），改后重启</td></tr>
+        <tr><td>数据来源（推荐）</td><td><b>直连模式</b>：数据源管理页面把数据源指向 MES 数据库（只读账号），报表 SQL 直接查 MES 的工单/报工/质检表，数据零同步、实时</td></tr>
+        <tr><td>数据来源（可选）</td><td><b>落库模式</b>：表单开发向导建表，MES 通过公共保存接口反写数据</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- 模式一 -->
+  <div class="api-block">
+    <div class="head"><span class="method GET">模式一</span><b>MES 后端拉数据</b><span class="muted">推荐：Token 只保存在 MES 服务端</span></div>
+    <div class="body">
+      <p class="mb12">MES 服务端持有 Token 调公共接口，MES 前端自行渲染。表格用 <code class="mono">getColumns</code>+<code class="mono">getData</code>，图表用 <code class="mono">getChartData</code>，交叉分析用 <code class="mono">getCrossTable</code>。</p>
+      <pre class="code">// Java 示例 —— 查询"当日报工"第1页（区间筛选 + 精确筛选 + 合计）
+HttpGet get = new HttpGet("http://litereport:8085/online/cgreport/api/getData"
+    + "/bao_gong?pageNo=1&pageSize=50"
+    + "&create_time_bw=2026-09-01 00:00:00,2026-09-06 23:59:59"   // 列上筛选：介于
+    + "&line_no=SMT-01"                                           // 列上筛选：精确
+    + "&needSummary=true");                                       // 返回合计
+get.setHeader("X-API-Token", "mes-token-xxx");
+// result.records = 数据行  result.total = 总数  result.summary = 合计列汇总
+// result.records 内字典字段已可在渲染端用 getDict 翻译</pre>
+      <pre class="code">// 列上筛选速查（列名必须在报表字段配置中）
+列=值              精确         列_like=值        模糊
+列_in=a,b          枚举         列_bw=a,b         区间
+列_ne / _gt / _ge / _lt / _le    比较
+// 排序与分页：column=列名 & order=asc|desc & pageNo & pageSize
+// 跳过计数（大数据量）：needCount=false → total 返回 -1</pre>
+      <pre class="code">// curl 自测（先在平台内确认报表编码，如 demo_report）
+curl -H "X-API-Token: mes-token-xxx" \
+  "http://litereport:8085/online/cgreport/api/getData/demo_report?pageNo=1&pageSize=10&name=王"</pre>
+    </div>
+  </div>
+
+  <!-- 模式二 -->
+  <div class="api-block">
+    <div class="head"><span class="method GET">模式二</span><b>iframe 嵌入报表页面</b></div>
+    <div class="body">
+      <p class="mb12">在报表配置列表 → 更多 → <b>配置地址</b>，复制页面地址（<code class="mono">/online/cgreport/{id}</code>）嵌入 MES：</p>
+      <pre class="code">&lt;iframe src="http://litereport:8085/online/cgreport/{id}"
+        style="width:100%;height:800px;border:0"&gt;&lt;/iframe&gt;</pre>
+      <p class="muted">页面走登录会话。<b>跨域 iframe 时 Cookie 受限</b>，两种解法：① LiteReport 与 MES 同主域（如 mes.company.com / report.company.com）且启用 HTTPS；② 改用模式一由 MES 自渲染（推荐）。</p>
+    </div>
+  </div>
+
+  <!-- 模式三 -->
+  <div class="api-block">
+    <div class="head"><span class="method POST">模式三</span><b>MES 反写数据（公共保存/删除）</b></div>
+    <div class="body">
+      <p class="mb12">把采集/上报数据写进 LiteReport 管理的数据表（表可由「Online表单开发」向导创建，自动生成对应报表）。<code class="mono">data.id</code> 有值且存在则更新，否则插入（id 自动生成）。</p>
+      <pre class="code"># 单条上报
+curl -X POST -H "X-API-Token: mes-token-xxx" \
+  -H "Content-Type: application/json" \
+  http://litereport:8085/online/cgreport/api/saveData/mes_collect \
+  -d '{"data":{"sn":"PCB20260906001","line_no":"SMT-01","qty":120,"result":"OK"}}'
+
+# 批量（含修改：id 有值走 UPDATE）
+-d '{"dataList":[{"id":"abc123","qty":130},{"sn":"PCB002","qty":50,"result":"NG"}]}'
+
+# 删除误录
+curl -X POST -H "X-API-Token: mes-token-xxx" \
+  http://litereport:8085/online/cgreport/api/deleteData/mes_collect \
+  -d '{"ids":["abc123"]}'</pre>
+    </div>
+  </div>
+
+  <!-- 模式四 -->
+  <div class="api-block">
+    <div class="head"><span class="method POST">模式四</span><b>报表主动推送</b></div>
+    <div class="body">
+      <ul style="line-height:2">
+        <li><b>定时推送</b>：推送页面（📤推送）配置任务，按分钟间隔把报表 Excel 作为附件发邮箱（smtp 段配置）</li>
+        <li><b>钉钉/企微群机器人</b>：渠道选“钉钉机器人/企微机器人”，填群机器人 webhook，产线日报定时推卡片到群</li>
+        <li>MES 侧也可自拉：定时调 <code class="mono">exportExcel/{code}</code> 落文件</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- 安全建议 -->
+  <div class="api-block">
+    <div class="head"><span class="method GET">TIPS</span><b>安全与运维建议</b></div>
+    <div class="body">
+      <table class="param-table">
+        <tr><th>#</th><th>建议</th></tr>
+        <tr><td>1</td><td>Token 只放 MES <b>服务端</b>，不要下发到浏览器代码；浏览器直调场景经 MES 网关转发</td></tr>
+        <tr><td>2</td><td>直连模式使用<b>只读数据库账号</b>；仅反写场景为对应表单独开写权限</td></tr>
+        <tr><td>3</td><td>MES 高频轮询时调大 <code class="mono">ratelimit.public_rps</code>；多实例部署配置 <code class="mono">ratelimit.redis_addr</code> 共享限流窗口</td></tr>
+        <tr><td>4</td><td>状态码类字段在「字典管理」配好，报表与查询区自动翻译</td></tr>
+        <tr><td>5</td><td>公共接口路径与响应结构保持稳定；MES 侧以 <code class="mono">success</code> 字段判断成败，限流时返回 429</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- 速查 -->
+  <div class="api-block">
+    <div class="head"><span class="method GET">API</span><b>公共接口速查</b>（完整参数见 <a href="/api.html">公共接口文档</a>）</div>
+    <div class="body">
+      <table class="param-table">
+        <tr><th>接口</th><th>用途</th></tr>
+        <tr><td class="mono">GET /online/cgreport/api/getData/{code}</td><td>分页查询（筛选/排序/参数/汇总）</td></tr>
+        <tr><td class="mono">GET /online/cgreport/api/getDataNoPage/{code}</td><td>全量查询（跳过计数）</td></tr>
+        <tr><td class="mono">GET /online/cgreport/api/getColumns/{code}</td><td>字段配置（动态渲染表格）</td></tr>
+        <tr><td class="mono">GET /online/cgreport/api/getInfo/{code或id}</td><td>报表完整配置</td></tr>
+        <tr><td class="mono">GET /online/cgreport/api/getChartData/{code}</td><td>维度聚合（图表）</td></tr>
+        <tr><td class="mono">GET /online/cgreport/api/getCrossTable/{code}</td><td>交叉表</td></tr>
+        <tr><td class="mono">GET /online/cgreport/api/getDict/{code}</td><td>字典项</td></tr>
+        <tr><td class="mono">GET /online/cgreport/api/exportExcel/{code}</td><td>导出 Excel（带条件）</td></tr>
+        <tr><td class="mono">POST /online/cgreport/api/saveData/{code}</td><td>保存（插入/更新/批量）</td></tr>
+        <tr><td class="mono">POST /online/cgreport/api/importExcel/{code}</td><td>导入 Excel（multipart file，首行表头=字段名）</td></tr>
+        <tr><td class="mono">POST /online/cgreport/api/deleteData/{code}</td><td>删除</td></tr>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script src="/js/common.js?v=2"></script>
+<script>renderNav('');</script>
+</body>
+</html>

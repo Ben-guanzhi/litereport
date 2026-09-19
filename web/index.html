@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Online报表配置 - LiteReport平台</title>
+<link rel="stylesheet" href="/css/app.css?v=2">
+</head>
+<body>
+<nav class="nav" id="nav"></nav>
+
+<div class="page">
+  <div class="card">
+    <!-- 搜索区 -->
+    <div class="search-bar">
+      <span class="form-item"><label>报表名称:</label>
+        <input class="input w-lg" id="qName" placeholder="请输入报表名称" onkeydown="if(event.key==='Enter')reload(1)"></span>
+      <span class="form-item"><label>报表编码:</label>
+        <input class="input w-lg" id="qCode" placeholder="请输入报表编码" onkeydown="if(event.key==='Enter')reload(1)"></span>
+      <span class="form-item"><label>分类:</label>
+        <input class="input w-md" id="qCat" placeholder="如 财务/生产" onkeydown="if(event.key==='Enter')reload(1)"></span>
+      <button class="btn btn-primary" onclick="reload(1)">🔍 查询</button>
+      <button class="btn" onclick="$('#qName').value='';$('#qCode').value='';$('#qCat').value='';reload(1)">↻ 重置</button>
+    </div>
+
+    <!-- 工具条 -->
+    <div class="toolbar">
+      <button class="btn btn-primary" onclick="openCreate()">＋ 录入</button>
+      <button class="btn btn-primary" onclick="openModal('aiModal')">🤖 AI生成报表</button>
+      <button class="btn" onclick="openImport()">📥 导入配置</button>
+      <button class="btn only-admin" onclick="showSqlHistory()">📜 SQL历史</button>
+      <span class="grow"></span>
+      <button class="icon-btn" title="刷新" onclick="reload()">⟳</button>
+      <button class="icon-btn" title="公共接口文档" onclick="location.href='/api.html'">⚙</button>
+    </div>
+
+    <div class="alert-info"><span class="dot">i</span><span id="selTip">未选中任何数据</span></div>
+
+    <div class="table-wrap">
+      <table class="grid" id="listTable">
+        <thead>
+          <tr>
+            <th style="width:40px"><input type="checkbox" onchange="toggleAll(this)"></th>
+            <th>报表名字</th><th>报表编码</th><th>报表SQL</th><th>数据源</th><th>分类</th><th>创建时间</th><th style="width:150px">操作</th>
+          </tr>
+        </thead>
+        <tbody id="listBody"></tbody>
+      </table>
+    </div>
+
+    <div class="pager">
+      <span class="total">共 <b id="total">0</b> 条数据</span>
+      <div class="pages" id="pages"></div>
+      <select class="input" style="width:100px;height:30px" id="pageSize" onchange="reload(1)">
+        <option>10条/页</option><option>20条/页</option><option>50条/页</option>
+      </select>
+    </div>
+  </div>
+</div>
+
+<!-- ═════════ 录入/编辑弹窗 ═════════ -->
+<div class="mask" id="editModal">
+  <div class="modal">
+    <div class="modal-head"><span class="title" id="editTitle">编辑</span>
+      <button class="close" onclick="closeModal('editModal')">✕</button></div>
+    <div class="modal-body">
+      <div class="form-row">
+        <span class="form-item"><label class="req">报表编码:</label>
+          <input class="input w-md mono" id="fCode" placeholder="如 testbigdata"></span>
+        <span class="form-item"><label class="req">报表名字:</label>
+          <input class="input w-md" id="fName" placeholder="如 测试大数据"></span>
+        <span class="form-item"><label>动态数据源:</label>
+          <select class="input w-md" id="fDs"></select></span>
+        <span class="form-item"><label>分类:</label>
+          <input class="input w-sm" id="fCat" placeholder="如 财务/生产"></span>
+      </div>
+      <div class="form-row">
+        <span class="form-item"><label title="非管理员查询时自动追加的过滤条件，{user} 为当前用户名">行级权限过滤:</label>
+          <input class="input w-lg mono" id="fPerm" placeholder='如 dept = "{user}"'></span>
+        <span class="form-item"><label>启用:</label>
+          <input type="checkbox" id="fPermOn"></span>
+      </div>
+      <div class="form-row">
+        <span class="form-item" style="align-items:flex-start"><label class="req" style="margin-top:8px">报表SQL:</label>
+          <div class="sql-wrap">
+            <textarea class="sql-area" id="fSql" rows="7" placeholder="select * from sys_log order by create_time desc&#10;支持 ${paramName} 动态参数"></textarea>
+            <div style="display:flex;flex-direction:column;gap:8px;align-items:center">
+              <span class="muted" title="执行SQL并解析字段列表">?</span>
+              <button class="btn btn-primary parse-btn" onclick="parseSql()">SQL解析</button>
+              <button class="btn parse-btn" onclick="previewSql()">试运行</button>
+            </div>
+          </div>
+        </span>
+      </div>
+      <div id="previewBox" style="display:none" class="grid-edit mb12"></div>
+
+      <div class="tabs">
+        <span class="tab active" data-tab="itemsPane" onclick="switchTab(this)">动态报表配置明细</span>
+        <span class="tab" data-tab="paramsPane" onclick="switchTab(this)">报表参数</span>
+      </div>
+
+      <div class="tab-pane active" id="itemsPane">
+        <button class="btn btn-primary btn-sm add-row-btn" onclick="addItemRow()">＋ 新增</button>
+        <button class="btn btn-sm btn-danger" onclick="delCheckedItems()">删除选中</button>
+        <div class="grid-edit">
+          <table class="edit" id="itemsGrid">
+            <thead><tr>
+              <th style="width:34px">≡</th><th style="width:34px"><input type="checkbox" id="itemsAll" onchange="toggleAllItems(this)"></th>
+              <th style="width:36px">#</th>
+              <th><span class="req">☑字段名字</span></th><th><span class="req">☑字段文本</span></th>
+              <th style="width:70px">☑宽度</th><th><span class="req">☑类型</span></th>
+              <th style="width:52px">列显示</th><th>☑字段href</th><th style="width:46px">查询</th>
+              <th>☑查询模式</th><th>☑取值表达式</th><th>☑字典code</th><th>☑分组标题</th>
+              <th style="width:52px">合计列</th><th>渲染规则</th><th style="width:44px">操作</th>
+            </tr></thead>
+            <tbody id="itemsBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="tab-pane" id="paramsPane">
+        <button class="btn btn-primary btn-sm add-row-btn" onclick="addParamRow()">＋ 新增</button>
+        <button class="btn btn-sm btn-danger" onclick="delCheckedParams()">删除选中</button>
+        <div class="grid-edit">
+          <table class="edit" id="paramsGrid" style="min-width:560px">
+            <thead><tr>
+              <th style="width:34px"><input type="checkbox" id="paramsAll" onchange="toggleAllParams(this)"></th><th style="width:36px">#</th>
+              <th><span class="req">☑参数字段</span></th><th><span class="req">☑参数文本</span></th>
+              <th>☑默认值</th><th style="width:44px">操作</th>
+            </tr></thead>
+            <tbody id="paramsBody"></tbody>
+          </table>
+        </div>
+        <p class="muted mt8">报表SQL 中使用 <code class="mono">${参数字段}</code> 引用参数，查询时会绑定同名请求参数的值（无值时使用默认值）。</p>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal('editModal')">取消</button>
+      <button class="btn btn-primary" onclick="saveReport()">确认</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═════════ 配置地址弹窗 ═════════ -->
+<div class="mask" id="urlModal">
+  <div class="modal narrow">
+    <div class="modal-head"><span class="title" id="urlTitle">菜单链接</span>
+      <button class="close" onclick="closeModal('urlModal')">✕</button></div>
+    <div class="modal-body">
+      <p class="mono" id="urlText" style="word-break:break-all"></p>
+      <p class="muted mt8">功能测试页面地址。可复制后配置到系统菜单，或直接调用公共接口获取数据。</p>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="copySql()">复制SQL</button>
+      <button class="btn btn-primary" onclick="copyUrl()">复制URL</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═════════ SQL 执行历史弹窗（admin）═════════ -->
+<div class="mask" id="histModal">
+  <div class="modal" style="width:880px">
+    <div class="modal-head"><span class="title">SQL 执行历史</span>
+      <button class="close" onclick="closeModal('histModal')">✕</button></div>
+    <div class="modal-body">
+      <div class="table-wrap">
+        <table class="grid">
+          <thead><tr><th>时间</th><th>用户</th><th>数据源</th><th>耗时</th><th>行数</th><th>状态</th><th>SQL</th></tr></thead>
+          <tbody id="histBody"></tbody>
+        </table>
+      </div>
+      <div class="pager">
+        <span class="total">共 <b id="histTotal">0</b> 条</span>
+        <div class="pages" id="histPages"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═════════ AI生成报表弹窗 ═════════ -->
+<div class="mask" id="aiModal">
+  <div class="modal" style="width:640px">
+    <div class="modal-head"><span class="title">AI生成报表</span>
+      <button class="close" onclick="closeModal('aiModal')">✕</button></div>
+    <div class="modal-body">
+      <div class="form-row">
+        <span class="form-item"><label>数据表名:</label>
+          <input class="input w-md mono" id="aiTable" placeholder="如 demo / sys_log"></span>
+      </div>
+      <div class="form-row" style="align-items:flex-start">
+        <span class="form-item" style="align-items:flex-start"><label style="margin-top:8px">需求描述:</label>
+          <textarea class="sql-area" id="aiDesc" rows="3" style="width:420px" placeholder="如：查询工资大于1000的男性，按创建时间倒序"></textarea></span>
+      </div>
+      <p class="muted mt8">填写需求描述后将调用 AI 接口按表结构生成SQL（需在 config.yaml 的 ai 段配置 base_url/api_key/model）；留空描述则快速生成 select * 。</p>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal('aiModal')">取消</button>
+      <button class="btn" id="aiGenBtn" onclick="aiGenSQL()">🤖 AI生成SQL</button>
+      <button class="btn btn-primary" onclick="aiGenerate()">快速生成</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═════════ 版本历史弹窗 ═════════ -->
+<div class="mask" id="verModal">
+  <div class="modal" style="width:680px">
+    <div class="modal-head"><span class="title" id="verTitle">版本历史</span>
+      <button class="close" onclick="closeModal('verModal')">✕</button></div>
+    <div class="modal-body">
+      <div class="table-wrap">
+        <table class="grid">
+          <thead><tr><th>时间</th><th>操作人</th><th style="width:180px">操作</th></tr></thead>
+          <tbody id="verBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═════════ 导入配置弹窗 ═════════ -->
+<div class="mask" id="impModal">
+  <div class="modal" style="width:640px">
+    <div class="modal-head"><span class="title">导入报表配置</span>
+      <button class="close" onclick="closeModal('impModal')">✕</button></div>
+    <div class="modal-body">
+      <input type="file" id="impFile" accept=".json" style="margin-bottom:10px">
+      <textarea class="sql-area" id="impJson" style="width:100%;min-height:180px" placeholder="或直接粘贴导出的配置JSON"></textarea>
+      <p class="muted mt8">编码冲突时自动加 _imp 后缀。</p>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal('impModal')">取消</button>
+      <button class="btn btn-primary" onclick="doImport()">导 入</button>
+    </div>
+  </div>
+</div>
+<script src="/js/common.js?v=2"></script>
+<script src="/js/index-app.js?v=1"></script>
+</body>
+</html>

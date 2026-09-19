@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>审计日志 - LiteReport平台</title>
+<link rel="stylesheet" href="/css/app.css?v=2">
+</head>
+<body>
+<nav class="nav" id="nav"></nav>
+
+<div class="page">
+  <div class="card">
+    <div class="search-bar">
+      <span class="form-item"><label>操作类型:</label>
+        <select class="input w-md" id="qAction"><option value="">全部</option>
+          <option>登录</option><option>报表保存</option><option>报表删除</option><option>配置回滚</option>
+          <option>数据写入</option><option>数据删除</option><option>导出Excel</option><option>数据源保存</option></select></span>
+      <span class="form-item"><label>用户:</label><input class="input w-md" id="qUser" placeholder="用户名"></span>
+      <button class="btn btn-primary" onclick="load(1)">🔍 查询</button>
+      <button class="btn" onclick="document.getElementById('qAction').value='';document.getElementById('qUser').value='';load(1)">↻ 重置</button>
+    </div>
+    <div class="table-wrap">
+      <table class="grid" id="grid">
+        <thead><tr><th>时间</th><th>用户</th><th>IP</th><th>操作</th><th>对象</th><th class="left">详情</th></tr></thead>
+        <tbody id="body"></tbody>
+      </table>
+    </div>
+    <div class="pager">
+      <span class="total">共 <b id="total">0</b> 条</span>
+      <div class="pages" id="pages"></div>
+    </div>
+  </div>
+</div>
+<script src="/js/common.js?v=2"></script>
+<script>
+renderNav('');
+var page = 1;
+var table = new LiteTable({
+  table: '#grid',
+  pager: '#pages',
+  pageSize: 20,
+  columns: [
+    { title: '时间', field: 'logTime' },
+    { title: '用户', field: 'userName' },
+    { title: 'IP', td: function (a) { return '<span class="mono">' + esc(a.ip) + '</span>'; } },
+    { title: '操作', field: 'action' },
+    { title: '对象', field: 'target' },
+    { title: '详情', td: function (a) { return '<span class="left muted">' + esc(a.detail || '') + '</span>'; } },
+  ],
+  emptyText: '暂无日志',
+  fetch: function (page, size) {
+    return api('/api/audit/list?pageNo=' + page + '&pageSize=' + size +
+        '&action=' + encodeURIComponent($('#qAction').value) +
+        '&user=' + encodeURIComponent($('#qUser').value)).then(function (r) {
+      return { rows: r.records || [], total: r.total };
+    });
+  }
+});
+function load(p) { table.reload(p); }
+
+load(1);
+</script>
+</body>
+</html>

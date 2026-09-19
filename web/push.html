@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>定时推送 - LiteReport平台</title>
+<link rel="stylesheet" href="/css/app.css?v=2">
+</head>
+<body>
+<nav class="nav" id="nav"></nav>
+
+<div class="page">
+  <div class="card">
+    <div class="toolbar">
+      <button class="btn btn-primary" onclick="openCreate()">＋ 新建推送任务</button>
+      <span class="grow"></span>
+      <button class="icon-btn" onclick="load()">⟳</button>
+    </div>
+    <div class="table-wrap">
+      <table class="grid" id="grid">
+        <thead><tr><th>报表编码</th><th>收件邮箱</th><th>间隔(分钟)</th><th>状态</th><th>上次运行</th><th>结果</th><th style="width:190px">操作</th></tr></thead>
+        <tbody id="body"></tbody>
+      </table>
+    </div>
+    <p class="muted mt8">调度器每分钟扫描到期任务，把报表 Excel 作为附件发送；SMTP 在 config.yaml 的 smtp 段配置。</p>
+  </div>
+</div>
+
+<div class="mask" id="pushModal">
+  <div class="modal" style="width:560px">
+    <div class="modal-head"><span class="title">推送任务</span>
+      <button class="close" onclick="closeModal('pushModal')">✕</button></div>
+    <div class="modal-body">
+      <div class="form-row">
+        <span class="form-item"><label class="req">报表:</label><select class="input w-md" id="fCode"></select></span>
+        <span class="form-item"><label class="req">间隔(分钟):</label><input class="input w-md mono" id="fInterval" value="60"></span>
+      </div>
+      <div class="form-row">
+        <span class="form-item"><label>渠道:</label>
+          <select class="input w-md" id="fChannel" onchange="chChanged()">
+            <option value="email">邮件</option><option value="dingtalk">钉钉机器人</option><option value="wecom">企微机器人</option>
+          </select></span>
+      </div>
+      <div class="form-row" id="emailRow">
+        <span class="form-item" style="align-items:flex-start"><label class="req" style="margin-top:6px">收件邮箱:</label>
+          <input class="input" style="width:340px" id="fEmails" placeholder="a@x.com, b@x.com（逗号分隔）"></span>
+      </div>
+      <div class="form-row" id="whRow" style="display:none">
+        <span class="form-item" style="align-items:flex-start"><label class="req" style="margin-top:6px">Webhook:</label>
+          <input class="input mono" style="width:340px" id="fWebhook" placeholder="机器人 webhook 地址"></span>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal('pushModal')">取消</button>
+      <button class="btn btn-primary" onclick="save()">保存</button>
+    </div>
+  </div>
+</div>
+
+<script src="/js/common.js?v=2"></script>
+<script>
+renderNav('');
+var table = new LiteTable({
+  table: '#grid',
+  columns: [
+    { title: '报表编码', td: function (p) { return '<span class="mono">' + esc(p.reportCode) + '</span>'; } },
+    { title: '收件邮箱', td: function (p) { return '<span class="left">' + esc(p.emails) + '</span>'; } },
+    { title: '间隔(分钟)', field: 'intervalMinutes' },
+    { title: '状态', td: function (p) { return p.enabled === 'Y' ? '<span style="color:#52c41a">启用</span>' : '停用'; } },
+    { title: '上次运行', td: function (p) { return esc(p.lastRun || '-'); } },
+    { title: '结果', td: function (p) {
+        if (p.lastStatus === 'ok') return '<span style="color:#52c41a">✔ 成功</span>';
+        if (p.lastStatus === 'fail') {
+          var reason = esc(p.lastError || '未知原因');
+          return '<span style="color:#ff4d4f;cursor:help" title="' + reason + '">✖ 失败</span>';
+        }
+        return '-';
+      } },
+    { title: '操作', td: function (p) {
+        var next = p.enabled === 'Y' ? 'N' : 'Y';
+        return '<a href="javascript:void(0)" class="p-send" data-id="' + p.id + '">立即发送</a> ' +
+          '<a href="javascript:void(0)" class="p-toggle" data-id="' + p.id + '" data-next="' + next + '">' + (p.enabled === 'Y' ? '停用' : '启用') + '</a> ' +
+          '<a href="javascript:void(0)" class="btn-link danger p-del" data-id="' + p.id + '">删除</a>';
+      } },
+  ],
+  emptyText: '暂无任务',
+  fetch: function (page, size) {
+    return api('/api/push/list').then(function (list) {
+      list = list || [];
+      return { rows: list, total: list.length };
+    });
+  }
+});
+function load() { table.reload(); }
+$('#body').addEventListener('click', function (e) {
+  var a = e.target.closest('a');
+  if (!a) return;
+  if (a.classList.contains('p-send')) sendNow(a.dataset.id);
+  else if (a.classList.contains('p-toggle')) toggle(a.dataset.id, a.dataset.next);
+  else if (a.classList.contains('p-del')) del(a.dataset.id);
+});
+function openCreate() {
+  api('/online/cgreport/head/list?pageNo=1&pageSize=100').then(function (r) {
+    $('#fCode').innerHTML = (r.records || []).map(function (h) {
+      return '<option value="' + esc(h.reportCode) + '">' + esc(h.reportName) + '</option>';
+    }).join('');
+    $('#fEmails').value = ''; $('#fInterval').value = 60; $('#fChannel').value = 'email'; chChanged();
+    openModal('pushModal');
+  }).catch(function (e) { toast(e.message, 'error'); });
+}
+function chChanged() {
+  var ch = $('#fChannel').value;
+  $('#emailRow').style.display = (ch === 'email') ? 'flex' : 'none';
+  $('#whRow').style.display = (ch === 'email') ? 'none' : 'flex';
+}
+function save() {
+  var body = {
+    reportCode: $('#fCode').value, emails: $('#fEmails').value.trim(),
+    channel: $('#fChannel').value, webhook: $('#fWebhook').value.trim(),
+    intervalMinutes: parseInt($('#fInterval').value) || 60, enabled: 'Y'
+  };
+  if (body.channel === 'email' && !body.emails) { toast('请填写收件邮箱', 'error'); return; }
+  if (body.channel !== 'email' && !body.webhook) { toast('请填写机器人 webhook 地址', 'error'); return; }
+  api('/api/push/save', { method: 'POST', body: body }).then(function () {
+    toast('已保存', 'success'); closeModal('pushModal'); load();
+  }).catch(function (e) { toast(e.message, 'error'); });
+}
+function sendNow(id) {
+  api('/api/push/send/' + id, { method: 'POST' }).then(function () { toast('已发送', 'success'); })
+    .catch(function (e) { toast(e.message, 'error'); });
+}
+function toggle(id, enabled) {
+  api('/api/push/list').then(function (list) {
+    var p = (list || []).find(function (x) { return x.id === id; });
+    p.enabled = enabled;
+    return api('/api/push/save', { method: 'POST', body: p });
+  }).then(function () { load(); }).catch(function (e) { toast(e.message, 'error'); });
+}
+function del(id) {
+  if (!confirm('确认删除该任务？')) return;
+  api('/api/push/' + id, { method: 'DELETE' }).then(function () { load(); }).catch(function (e) { toast(e.message, 'error'); });
+}
+load();
+</script>
+</body>
+</html>
